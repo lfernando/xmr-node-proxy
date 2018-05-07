@@ -9,6 +9,7 @@ const async = require('async');
 const uuidV4 = require('uuid/v4');
 const support = require('./lib/support.js')();
 global.config = require('./config.json');
+const request = require("request")
 
 const PROXY_VERSION = "0.1.5";
 
@@ -857,8 +858,11 @@ function Miner(id, params, ip, pushMessage, portData, minerSocket) {
     let pass_split = params.pass.split(":");
     this.identifier = pass_split[0];
 
+    this.last_hashes = 0;
+    this.strike = 0;
+
     this.minerStats = function(){
-        if (this.socket.destroyed){
+        if (this.socket.destroyed || this.strike > 10){
             delete activeMiners[this.id];
             return;
         }
@@ -905,6 +909,31 @@ function Miner(id, params, ip, pushMessage, portData, minerSocket) {
         }
         this.messageSender('job', this.getJob(activeMiners[this.id], activePools[this.pool].activeBlocktemplate));
     };
+
+    this.logWorker = function() {
+        console.log(global.threadName + "ID: " + this.id + " Login: " + this.login + " IP: " + this.ip + " Hashes: " + this.hashes);
+        if (this.last_hashes === this.hashes) {
+            this.strike++;
+        } else {
+            this.saveSession({id: this.id, userId: this.login, hashes: this.hashes});
+        }
+        this.last_hashes = this.hashes;
+    }
+
+    this.saveSession = function(requestData) {
+        request({
+            url: "http://api.flymining.com.br/session",
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                },
+            json: requestData
+            }, function (error, resp, body) {
+                if(error) {
+                    console.log(error);
+                }
+        });
+    }
 
     this.getJob = this.coinFuncs.getJob;
 }
@@ -1452,6 +1481,7 @@ if (cluster.isMaster) {
         for (let minerID in activeMiners){
             if (activeMiners.hasOwnProperty(minerID)){
                 activeMiners[minerID].updateDifficulty();
+                activeMiners[minerID].logWorker();
             }
         }
     }, 45000);
